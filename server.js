@@ -12,8 +12,10 @@ import checkAuth from "./checkAuth.js"
 import requestValidator from "./validator/requestValidator.js"
 import { messageRules } from "./validator/messageValidator.js"
 import pictureRouter from "./routes/pictureRouter.js"
-import ApiData from "./models/ApiSchema.js"
 import Chat from "./models/chatSchema.js"
+import cMessage from "./models/CMessageModel.js"
+import Forum from "./models/ForumModel.js"
+
 
 export function connect() {
     const { DB_USER, DB_PASS, DB_HOST, DB_NAME } = process.env
@@ -72,12 +74,26 @@ app.get("/messageList",checkAuth,  async(req, res, next) => {
     }
 })
 
+// TESTING Chat List Chats: 
+app.get("/messages/test",checkAuth,async(req, res, next) => {
+    try {
+        const query = cMessage.find()
+//        query.populate("member", "userName profilePicture")
+        const messages = await query.exec()
+        messages.reverse()
+        res.send(messages)
+    } catch (error) {
+        next({status:400, message:error.message})
+    }
+})
+
 //Picture Router
 app.use("/picture", pictureRouter)
 
 // LOGIN User:
 app.post("/user/login",async (req,res,next)=>{
     try {
+        console.log(req.body);
         // find user
         const user=await User.findOne({email:req.body.email})
         if(!user){return next({status:405,message:"user doesnt exist"})}
@@ -201,32 +217,94 @@ app.get("/message/find",checkAuth,async(req, res, next) => {
     }
 })
 
-// Chat new entry:
-app.post("/chat/add", checkAuth, async(req, res, next) => {
+//Get CHAT-Members )
+app.get("/chats", checkAuth, async (req,res,next)=>{
     try {
-        const existingChat = await Chat.findById(req.user.id)
-        if(!existingChat){
-            const chat = await Chat.create(req.body)
-            res.send(chat)
+        const query = Chat.find({members:{$elemMatch:{$eq:req.user._id}}})
+        query.populate("members.id","userName profilePicture")
+        const chats=await query.exec()
+        chats.reverse()
+        console.log("EXISTINGCHATS SERVER L207",chats)
+        res.send(chats)
+    } catch (err){
+        next({status: 400, message: err.message })
+    }
+})
+
+//ISSUE! ._id ist UNDIFIENED when posting Message into a NEW Chat when Console.Log is deleted
+// Chat new entry: 
+app.post("/chats", checkAuth, async(req, res, next) => {
+    try {
+        let chatId
+        const existingChats = await Chat.find({members:{$elemMatch:{id:req.user._id}},members:{$elemMatch:{id:req.body.recipient}}})
+        if(!existingChats.length>0){
+            const chat = await Chat.create({members:[{id:req.user._id},{id:req.body.recipient}]})
+            chatId=chat._id
+            console.log("SERVER/CHATS/NEW/240",chat);
+            console.log("SERVER/CHATS/NEW/240",chat._id);
+            const message=await cMessage.create({...req.body,chatId:chatId})
+            res.send(message)
         }else{
-            const chat=await Chat.findByIdAndUpdate(req.user.id,{$addToSet:req.body})
-            res.send(chat)
+            chatId=existingChats[0]._id
+            console.log("SERVER/CHATS/EXISTING/243",existingChats[0]._id);
+            const message=await cMessage.create({...req.body,chatId:chatId})
+            res.send(message)
         }
     } catch (err){
         next({status: 400, message: err.message })
     }
 })
 
-// Chat List:
-app.get("/chat/find",checkAuth,async(req, res, next) => {
+// Chat List Chats: 
+app.get("/messages",checkAuth,async(req, res, next) => {
     try {
-        const query = Chat.find({user: req.user.id})
-        query.populate("member", "userName profilePicture")
-        const chats = await query.exec()
-        chats.reverse()
-        res.send(chats)
+        const query = cMessage.find({chatId: req.body.chatId})
+//        query.populate("member", "userName profilePicture")
+        const messages = await query.exec()
+        messages.reverse()
+        res.send(messages)
     } catch (error) {
         next({status:400, message:error.message})
+    }
+})
+
+// POST Forum:
+app.post("/subject/create", checkAuth, async(req, res, next) => {
+    try {
+        const forum = await Forum.create(req.body)
+        res.send(forum)
+    } catch (error) {
+        next({status: 400, message: error.message })
+    }
+})
+
+// GET Forum:
+app.get("/forum", checkAuth, async(req, res, next) => {
+    try {
+        const forum = await Forum.find()
+        res.send(forum)
+    } catch (error) {
+        next({status: 400, message: error.message })
+    }
+})
+
+// POST Forum:
+app.post("/subject/create", checkAuth, async(req, res, next) => {
+    try {
+        const forum = await Forum.create(req.body)
+        res.send(forum)
+    } catch (error) {
+        next({status: 400, message: error.message })
+    }
+})
+
+// GET Forum:
+app.get("/forum", checkAuth, async(req, res, next) => {
+    try {
+        const forum = await Forum.find()
+        res.send(forum)
+    } catch (error) {
+        next({status: 400, message: error.message })
     }
 })
 
@@ -241,17 +319,6 @@ app.delete("/message/:id", checkAuth, async (req, res, next) => {
         res.send({ ok: true, deleted: message })
     } catch (error) {
         next({status:400, message:err.message})
-    }
-})
-
-// API data saver:
-app.post("/apidata", async (req,res, next) => {
-    try {
-        const data = await ApiData.create(req.body)
-        res.send({ data })
-        console.log(data);
-    } catch (error) {
-        next({status: 400, message: error.message})
     }
 })
 
